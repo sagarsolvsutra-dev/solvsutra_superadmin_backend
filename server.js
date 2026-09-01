@@ -59,6 +59,8 @@ app.use(cors({
   origin: [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://localhost:3011",
+    "https://solvsutra-superadmin-backend.onrender.com",
     process.env.FRONTEND_URL,
   ].filter(Boolean),
   credentials: true,
