@@ -67,7 +67,9 @@ const checkExpiredSubscriptions = async () => {
 
     for (const sub of expired) {
       sub.status = "expired";
-      sub.gracePeriodEndDate = addDuration(now, sub.gracePeriodDays || 7, "day");
+      // `?? 7`, not `|| 7` — an admin-configured 0-day grace period is valid
+      // and must not be silently overridden back up to 7.
+      sub.gracePeriodEndDate = addDuration(now, sub.gracePeriodDays ?? 7, "day");
       await sub.save();
 
       // Update associated project status

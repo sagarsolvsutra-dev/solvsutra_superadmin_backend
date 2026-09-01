@@ -1,4 +1,5 @@
 const Server = require("../models/Server");
+const Project = require("../models/Project");
 const ActivityLog = require("../models/ActivityLog");
 const { generateServerId } = require("../utils/generateIds");
 const { asyncHandler } = require("../middleware/errorHandler");
@@ -149,8 +150,15 @@ const deleteServer = asyncHandler(async (req, res) => {
     });
   }
 
-  server.status = "inactive";
-  await server.save();
+  const projectsUsingServer = await Project.countDocuments({ serverId: server._id });
+  if (projectsUsingServer > 0) {
+    return res.status(400).json({
+      success: false,
+      message: `Cannot delete server: ${projectsUsingServer} project(s) are using this server. Please remove or reassign those projects first.`,
+    });
+  }
+
+  await server.deleteOne();
 
   await ActivityLog.create({
     userId: req.user._id,
@@ -163,7 +171,7 @@ const deleteServer = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    message: "Server deactivated",
+    message: "Server deleted successfully",
   });
 });
 

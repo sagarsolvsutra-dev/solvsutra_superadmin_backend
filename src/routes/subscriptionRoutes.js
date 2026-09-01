@@ -6,6 +6,7 @@ const {
   getSubscriptionByProject,
   createSubscription,
   updateSubscription,
+  deleteSubscription,
   renewSubscription,
   suspendSubscription,
   getSubscriptionStats,
@@ -25,7 +26,8 @@ router
 router
   .route("/:id")
   .get(protect, getSubscription)
-  .put(protect, authorize("super_admin", "admin"), updateSubscription);
+  .put(protect, authorize("super_admin", "admin"), updateSubscription)
+  .delete(protect, authorize("super_admin"), deleteSubscription);
 router.post(
   "/:id/renew",
   protect,

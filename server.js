@@ -4,9 +4,11 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
+const http = require("http");
 const connectDB = require("./src/config/db");
 const { notFound, globalErrorHandler } = require("./src/middleware/errorHandler");
 const { runExpiryCron } = require("./src/jobs/expiryCron");
+const { initSocket } = require("./src/utils/socket");
 
 // Route imports
 const authRoutes = require("./src/routes/authRoutes");
@@ -21,6 +23,8 @@ const serverRoutes = require("./src/routes/serverRoutes");
 const domainRoutes = require("./src/routes/domainRoutes");
 const dashboardRoutes = require("./src/routes/dashboardRoutes");
 const webhookRoutes = require("./src/routes/webhookRoutes");
+const publicSubscriptionRoutes = require("./src/routes/publicSubscriptionRoutes");
+const employeeRoutes = require("./src/routes/employeeRoutes");
 
 // Connect to Database
 connectDB().then(() => {
@@ -33,6 +37,23 @@ connectDB().then(() => {
 
 const app = express();
 
+// The public subscription API is called directly from client-project
+// frontends hosted at arbitrary, not-known-in-advance origins (e.g. Shyam
+// Enterprise's own frontend) and authenticates via X-Api-Key, not
+// cookies/session — so unlike the admin panel routes below, it can't be
+// restricted to a fixed origin allowlist. Registered before the general
+// CORS middleware because that one terminates every OPTIONS preflight
+// (including this path's) against its restricted origin list, so this must
+// run first or the public API is unreachable from any non-admin origin.
+app.use(
+  "/api/subscription/public",
+  cors({
+    origin: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "X-Api-Key", "X-Project-Id"],
+  })
+);
+
 // CORS - must come before rate limiter and body parser
 app.use(cors({
   origin: [
@@ -42,7 +63,7 @@ app.use(cors({
   ].filter(Boolean),
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Api-Key", "X-Project-Id"],
 }));
 
 // Handle OPTIONS preflight
@@ -87,6 +108,8 @@ app.use("/api/servers", serverRoutes);
 app.use("/api/domains", domainRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/webhooks", webhookRoutes);
+app.use("/api/subscription/public", publicSubscriptionRoutes);
+app.use("/api/employees", employeeRoutes);
 
 // Error handlers
 app.use(notFound);
@@ -233,8 +256,12 @@ async function seedData() {
   }
 }
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+initSocket(server);
+
+server.listen(PORT, () => {
   console.log(`🚀 SolvSutra Super Admin API running on port ${PORT}`);
+  console.log(`🔌 Realtime socket ready`);
 });
 
 module.exports = app;

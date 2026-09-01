@@ -174,7 +174,7 @@ const createSubscription = asyncHandler(async (req, res) => {
 // @route   PUT /api/subscriptions/:id
 // @access  Private
 const updateSubscription = asyncHandler(async (req, res) => {
-  const { autoRenew, status, notes } = req.body;
+  const { clientId, projectId, planId, startDate, gracePeriodDays, autoRenew, status, notes } = req.body;
 
   const subscription = await Subscription.findById(req.params.id);
 
@@ -183,6 +183,36 @@ const updateSubscription = asyncHandler(async (req, res) => {
       success: false,
       message: "Subscription not found",
     });
+  }
+
+  if (clientId) subscription.clientId = clientId;
+  if (projectId) subscription.projectId = projectId;
+
+  // Re-derive expiryDate/gracePeriodEndDate whenever anything that feeds
+  // that math changes — same formula createSubscription uses — so this form
+  // can't drift out of sync with the dates it implies.
+  const planChanged = planId && planId !== subscription.planId.toString();
+  const startChanged = startDate !== undefined && startDate !== "";
+  const graceChanged = gracePeriodDays !== undefined;
+
+  if (planChanged) subscription.planId = planId;
+  if (startChanged) subscription.startDate = new Date(startDate);
+  if (graceChanged) subscription.gracePeriodDays = gracePeriodDays;
+
+  if (planChanged || startChanged || graceChanged) {
+    const plan = await Plan.findById(subscription.planId);
+    if (!plan) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid plan",
+      });
+    }
+    subscription.expiryDate = addDuration(subscription.startDate, plan.duration, plan.durationUnit);
+    // `?? 7`, not `|| 7` — an explicit 0-day grace period is a real, valid
+    // choice here (this form just set `gracePeriodDays` to it above), and
+    // `0 || 7` would silently discard that 0 and grant a phantom 7-day grace
+    // that contradicts the `gracePeriodDays` value shown right next to it.
+    subscription.gracePeriodEndDate = addDuration(subscription.expiryDate, subscription.gracePeriodDays ?? 7, "day");
   }
 
   if (autoRenew !== undefined) subscription.autoRenew = autoRenew;
@@ -311,6 +341,36 @@ const suspendSubscription = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Delete subscription
+// @route   DELETE /api/subscriptions/:id
+// @access  Private (super_admin)
+const deleteSubscription = asyncHandler(async (req, res) => {
+  const subscription = await Subscription.findById(req.params.id);
+
+  if (!subscription) {
+    return res.status(404).json({
+      success: false,
+      message: "Subscription not found",
+    });
+  }
+
+  await subscription.deleteOne();
+
+  await ActivityLog.create({
+    userId: req.user._id,
+    action: "DELETE",
+    entity: "Subscription",
+    entityId: subscription._id.toString(),
+    metadata: { subscriptionId: subscription.subscriptionId },
+    ipAddress: req.ip,
+  });
+
+  res.json({
+    success: true,
+    message: "Subscription deleted successfully",
+  });
+});
+
 // @desc    Get subscription statistics
 // @route   GET /api/subscriptions/stats
 // @access  Private
@@ -352,6 +412,7 @@ module.exports = {
   getSubscriptionByProject,
   createSubscription,
   updateSubscription,
+  deleteSubscription,
   renewSubscription,
   suspendSubscription,
   getSubscriptionStats,

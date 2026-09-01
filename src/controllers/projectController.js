@@ -1,6 +1,7 @@
 const Project = require("../models/Project");
 const Client = require("../models/Client");
 const Subscription = require("../models/Subscription");
+const Payment = require("../models/Payment");
 const ActivityLog = require("../models/ActivityLog");
 const { generateProjectId, generateApiKey, generateApiSecret } = require("../utils/generateIds");
 const { asyncHandler } = require("../middleware/errorHandler");
@@ -197,8 +198,12 @@ const deleteProject = asyncHandler(async (req, res) => {
     });
   }
 
-  project.status = "inactive";
-  await project.save();
+  // Also delete related data
+  await Subscription.deleteMany({ projectId: project._id });
+  await Payment.deleteMany({ projectId: project._id });
+
+  // Hard delete
+  await project.deleteOne();
 
   await ActivityLog.create({
     userId: req.user._id,
@@ -211,7 +216,7 @@ const deleteProject = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    message: "Project deactivated",
+    message: "Project deleted successfully",
   });
 });
 

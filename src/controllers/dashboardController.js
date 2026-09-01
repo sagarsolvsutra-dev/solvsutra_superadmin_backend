@@ -1,71 +1,76 @@
 const Client = require("../models/Client");
 const Project = require("../models/Project");
+const Plan = require("../models/Plan");
 const Subscription = require("../models/Subscription");
 const Payment = require("../models/Payment");
 const Notification = require("../models/Notification");
 const { asyncHandler } = require("../middleware/errorHandler");
 const { getDaysRemaining } = require("../utils/dateHelpers");
 
-// @desc    Get dashboard statistics
+// @desc    Get dashboard stats
 // @route   GET /api/dashboard
 // @access  Private
 const getDashboardStats = asyncHandler(async (req, res) => {
   const now = new Date();
-  const thirtyDaysFromNow = new Date();
-  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
+  // Get counts in parallel
   const [
-    clientStats,
-    projectStats,
-    subscriptionStats,
-    paymentStats,
+    totalClients,
+    activeClients,
+    totalProjects,
+    activeProjects,
+    totalPlans,
+    totalSubscriptions,
+    activeSubscriptions,
+    expiringSubscriptions,
+    expiredSubscriptions,
+    gracePeriodSubscriptions,
+    suspendedSubscriptions,
+    expiringIn30Subscriptions,
   ] = await Promise.all([
-    // Client stats
-    Promise.all([
-      Client.countDocuments(),
-      Client.countDocuments({ status: "active" }),
-      Client.countDocuments({ status: "inactive" }),
-      Client.countDocuments({ status: "suspended" }),
-    ]),
-    // Project stats
-    Promise.all([
-      Project.countDocuments(),
-      Project.countDocuments({ status: "active" }),
-      Project.countDocuments({ status: "inactive" }),
-      Project.countDocuments({ status: "suspended" }),
-    ]),
-    // Subscription stats
-    Promise.all([
-      Subscription.countDocuments(),
-      Subscription.countDocuments({ status: "active" }),
-      Subscription.countDocuments({ status: "expiring" }),
-      Subscription.countDocuments({ status: "expired" }),
-      Subscription.countDocuments({ status: "grace_period" }),
-      Subscription.countDocuments({ status: "suspended" }),
-      Subscription.countDocuments({
-        status: "active",
-        expiryDate: { $lte: thirtyDaysFromNow, $gt: now },
-      }),
-    ]),
-    // Payment stats
-    Promise.all([
-      Payment.countDocuments(),
-      Payment.countDocuments({ status: "success" }),
-      Payment.countDocuments({ status: "pending" }),
-      Payment.countDocuments({ status: "failed" }),
-    ]),
+    Client.countDocuments(),
+    Client.countDocuments({ status: "active" }),
+    Project.countDocuments(),
+    Project.countDocuments({ status: "active" }),
+    Plan.countDocuments(),
+    Subscription.countDocuments(),
+    Subscription.countDocuments({
+      status: "active",
+      expiryDate: { $gt: now },
+    }),
+    Subscription.countDocuments({ status: "expiring" }),
+    Subscription.countDocuments({ status: "expired" }),
+    Subscription.countDocuments({ status: "grace_period" }),
+    Subscription.countDocuments({ status: "suspended" }),
+    Subscription.countDocuments({
+      status: { $in: ["active", "expiring"] },
+      expiryDate: { $lte: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), $gt: now },
+    }),
   ]);
 
-  // Revenue calculation
+  // Payment stats - aggregate by status
+  const paymentStats = await Payment.aggregate([
+    {
+      $group: {
+        _id: "$status",
+        count: { $sum: 1 },
+        total: { $sum: "$amount" },
+      },
+    },
+  ]);
+
+  // Convert array to key-value object
+  const paymentStatsObj = paymentStats.reduce((acc, curr) => {
+    acc[curr._id] = curr;
+    return acc;
+  }, {});
+
+  // Revenue calculations
   const revenueResult = await Payment.aggregate([
     { $match: { status: "success" } },
     { $group: { _id: null, total: { $sum: "$amount" } } },
   ]);
-
-  // Monthly revenue
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
 
   const monthlyRevenueResult = await Payment.aggregate([
     { $match: { status: "success", paidAt: { $gte: startOfMonth } } },
@@ -76,30 +81,34 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     success: true,
     stats: {
       clients: {
-        total: clientStats[0],
-        active: clientStats[1],
-        inactive: clientStats[2],
-        suspended: clientStats[3],
+        total: totalClients,
+        active: activeClients,
+        inactive: totalClients - activeClients,
+        suspended: 0,
       },
       projects: {
-        total: projectStats[0],
-        active: projectStats[1],
-        inactive: projectStats[2],
-        suspended: projectStats[3],
+        total: totalProjects,
+        active: activeProjects,
+        inactive: totalProjects - activeProjects,
+        suspended: 0,
       },
+      plans: totalPlans,
       subscriptions: {
-        total: subscriptionStats[0],
-        active: subscriptionStats[1],
-        expiring: subscriptionStats[6],
-        expired: subscriptionStats[3],
-        gracePeriod: subscriptionStats[4],
-        suspended: subscriptionStats[5],
+        total: totalSubscriptions,
+        active: activeSubscriptions,
+        expiring: expiringSubscriptions,
+        expired: expiredSubscriptions,
+        gracePeriod: gracePeriodSubscriptions,
+        suspended: suspendedSubscriptions,
+        expiringIn30: expiringIn30Subscriptions,
       },
       payments: {
-        total: paymentStats[0],
-        successful: paymentStats[1],
-        pending: paymentStats[2],
-        failed: paymentStats[3],
+        total: paymentStats.reduce((sum, p) => sum + p.count, 0),
+        success: paymentStatsObj.success?.count || 0,
+        pending: paymentStatsObj.pending?.count || 0,
+        failed: paymentStatsObj.failed?.count || 0,
+        totalRevenue: revenueResult[0]?.total || 0,
+        monthlyRevenue: monthlyRevenueResult[0]?.total || 0,
       },
       revenue: {
         total: revenueResult[0]?.total || 0,
@@ -116,15 +125,15 @@ const getDashboardWidgets = asyncHandler(async (req, res) => {
   const now = new Date();
   const thirtyDaysFromNow = new Date();
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
   const [
     recentClients,
     recentPayments,
     expiringProjects,
+    expiredProjects,
     failedPayments,
     unreadNotifications,
+    allExpiringSoon,
   ] = await Promise.all([
     // Recent clients
     Client.find().sort({ createdAt: -1 }).limit(5).select("companyName clientId email status createdAt"),
@@ -135,16 +144,27 @@ const getDashboardWidgets = asyncHandler(async (req, res) => {
       .limit(5)
       .populate("clientId", "companyName")
       .populate("projectId", "projectName")
-      .select("amount paidAt clientId projectId"),
+      .select("amount paidAt status paymentId currency clientId projectId"),
 
-    // Expiring subscriptions (within 30 days)
+    // Expiring subscriptions (within 30 days) - top 5 closest
     Subscription.find({
-      status: "active",
+      status: { $in: ["active", "expiring"] },
       expiryDate: { $lte: thirtyDaysFromNow, $gt: now },
     })
       .sort({ expiryDate: 1 })
       .limit(5)
-      .populate("clientId", "companyName")
+      .populate("clientId", "companyName clientId email")
+      .populate("projectId", "projectName projectId")
+      .populate("planId", "name price"),
+
+    // Already expired subscriptions
+    Subscription.find({
+      expiryDate: { $lt: now },
+      status: { $ne: "cancelled" },
+    })
+      .sort({ expiryDate: -1 })
+      .limit(5)
+      .populate("clientId", "companyName clientId")
       .populate("projectId", "projectName")
       .populate("planId", "name"),
 
@@ -161,6 +181,16 @@ const getDashboardWidgets = asyncHandler(async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(10)
       .select("title message type createdAt"),
+
+    // ALL expiring soon (full list, no limit) - for summary count
+    Subscription.find({
+      status: { $in: ["active", "expiring"] },
+      expiryDate: { $lte: thirtyDaysFromNow, $gt: now },
+    })
+      .sort({ expiryDate: 1 })
+      .populate("clientId", "companyName clientId")
+      .populate("projectId", "projectName projectId")
+      .populate("planId", "name price"),
   ]);
 
   // Add days remaining to expiring projects
@@ -169,14 +199,36 @@ const getDashboardWidgets = asyncHandler(async (req, res) => {
     daysRemaining: getDaysRemaining(sub.expiryDate),
   }));
 
+  const expiredWithDays = expiredProjects.map((sub) => ({
+    ...sub.toObject(),
+    daysExpired: Math.abs(getDaysRemaining(sub.expiryDate)),
+  }));
+
+  const allExpiringWithDays = allExpiringSoon.map((sub) => ({
+    ...sub.toObject(),
+    daysRemaining: getDaysRemaining(sub.expiryDate),
+  }));
+
+  // Calculate summary for banner
+  const summary = {
+    expiringCount: allExpiringSoon.length,
+    expiredCount: expiredProjects.length,
+    criticalCount: allExpiringSoon.filter(
+      (s) => getDaysRemaining(s.expiryDate) <= 7
+    ).length,
+  };
+
   res.json({
     success: true,
     widgets: {
       recentClients,
       recentPayments,
       expiringProjects: expiringWithDays,
+      expiredProjects: expiredWithDays,
+      allExpiringSoon: allExpiringWithDays,
       failedPayments,
       notifications: unreadNotifications,
+      summary,
     },
   });
 });

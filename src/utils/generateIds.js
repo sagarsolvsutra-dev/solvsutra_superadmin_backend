@@ -15,6 +15,9 @@ const generatePaymentId = () => generateId("PAY");
 const generateNotificationId = () => generateId("NTF");
 const generateServerId = () => generateId("SRV");
 const generateDomainId = () => generateId("DMN");
+const generateAssignmentId = () => generateId("ASG");
+const generateMilestoneId = () => generateId("MST");
+const generateEmployeeId = () => generateId("EMP");
 const generateApiKey = () => {
   const prefix = "ss";
   const uuid = uuidv4().replace(/-/g, "");
@@ -34,6 +37,9 @@ module.exports = {
   generateNotificationId,
   generateServerId,
   generateDomainId,
+  generateAssignmentId,
+  generateMilestoneId,
+  generateEmployeeId,
   generateApiKey,
   generateApiSecret,
 };

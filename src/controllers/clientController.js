@@ -184,15 +184,14 @@ const deleteClient = asyncHandler(async (req, res) => {
     });
   }
 
-  // Soft delete
-  client.status = "inactive";
-  await client.save();
+  // Also delete related data
+  const projectIds = await Project.find({ clientId: client._id }).distinct("_id");
+  await Subscription.deleteMany({ clientId: client._id });
+  await Payment.deleteMany({ clientId: client._id });
+  await Project.deleteMany({ clientId: client._id });
 
-  // Also suspend related projects
-  await Project.updateMany(
-    { clientId: client._id },
-    { status: "inactive" }
-  );
+  // Hard delete
+  await client.deleteOne();
 
   await ActivityLog.create({
     userId: req.user._id,
@@ -205,7 +204,7 @@ const deleteClient = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    message: "Client deactivated",
+    message: "Client deleted successfully",
   });
 });
 

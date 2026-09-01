@@ -41,4 +41,20 @@ notificationSchema.index({ type: 1 });
 notificationSchema.index({ isRead: 1 });
 notificationSchema.index({ createdAt: -1 });
 
+// Broadcasts every new notification over the admin socket room, wherever it
+// was created (subscription/payment controllers, the expiry cron, the
+// public renewal flow) — a model hook instead of duplicating the emit call
+// at each of those sites, and it stays correct if a new call site is added
+// later. Only fires on creation, not on later saves like `isRead` updates.
+notificationSchema.post("save", function (doc, next) {
+  if (this.wasNew) {
+    require("../utils/socket").emitNewNotification(doc.toObject());
+  }
+  next();
+});
+notificationSchema.pre("save", function (next) {
+  this.wasNew = this.isNew;
+  next();
+});
+
 module.exports = mongoose.model("Notification", notificationSchema);
