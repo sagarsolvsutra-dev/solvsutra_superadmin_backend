@@ -37,14 +37,6 @@ connectDB().then(() => {
 
 const app = express();
 
-// The public subscription API is called directly from client-project
-// frontends hosted at arbitrary, not-known-in-advance origins (e.g. Shyam
-// Enterprise's own frontend) and authenticates via X-Api-Key, not
-// cookies/session — so unlike the admin panel routes below, it can't be
-// restricted to a fixed origin allowlist. Registered before the general
-// CORS middleware because that one terminates every OPTIONS preflight
-// (including this path's) against its restricted origin list, so this must
-// run first or the public API is unreachable from any non-admin origin.
 app.use(
   "/api/subscription/public",
   cors({
@@ -60,7 +52,7 @@ app.use(cors({
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3011",
-    "https://solvsutra-superadmin-backend.onrender.com",
+    "https://solvsutra-superadmin-frontend.vercel.app",
     process.env.FRONTEND_URL,
   ].filter(Boolean),
   credentials: true,
