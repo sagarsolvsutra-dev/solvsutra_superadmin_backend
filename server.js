@@ -26,15 +26,6 @@ const webhookRoutes = require("./src/routes/webhookRoutes");
 const publicSubscriptionRoutes = require("./src/routes/publicSubscriptionRoutes");
 const employeeRoutes = require("./src/routes/employeeRoutes");
 
-// Connect to Database
-connectDB().then(() => {
-  console.log("��� Database connected successfully");
-  // Seed initial data
-  seedData();
-}).catch(err => {
-  console.error(`❌ Database connection failed: ${err.message}`);
-});
-
 const app = express();
 
 app.use(
@@ -253,9 +244,25 @@ async function seedData() {
 const server = http.createServer(app);
 initSocket(server);
 
-server.listen(PORT, () => {
-  console.log(`🚀 SolvSutra Super Admin API running on port ${PORT}`);
-  console.log(`🔌 Realtime socket ready`);
-});
+// Previously `connectDB()` and `server.listen()` ran independently — a DB
+// connection failure just logged an error while the server started and
+// accepted traffic anyway, so every request touching a model hung in
+// Mongoose's query buffer for the full 10s default before failing (exactly
+// the "users.findOne() buffering timed out" symptom). Gating startup on a
+// successful connection turns that into an immediate, loud failure instead.
+connectDB()
+  .then(() => {
+    console.log("✅ Database connected successfully");
+    seedData();
+    server.listen(PORT, () => {
+      console.log(`🚀 SolvSutra Super Admin API running on port ${PORT}`);
+      console.log(`🔌 Realtime socket ready`);
+    });
+  })
+  .catch((err) => {
+    console.error(`❌ Database connection failed: ${err.message}`);
+    console.error("Refusing to start — check MONGODB_URI and that this host's IP is allow-listed in MongoDB Atlas.");
+    process.exit(1);
+  });
 
 module.exports = app;
