@@ -36,12 +36,14 @@ const authenticateProject = asyncHandler(async (req, res, next) => {
     });
   }
 
-  const project = await Project.findOne({
-    $or: [
-      { apiKey },
-      ...(projectId ? [{ _id: projectId.match(/^[0-9a-fA-F]{24}$/) ? projectId : null }] : []),
-    ],
-  }).populate("clientId");
+  const query = { apiKey };
+  if (projectId) {
+    const idClauses = [{ projectId }];
+    if (/^[0-9a-fA-F]{24}$/.test(projectId)) idClauses.push({ _id: projectId });
+    query.$or = idClauses;
+  }
+
+  const project = await Project.findOne(query).populate("clientId");
 
   if (!project) {
     return res.status(401).json({
