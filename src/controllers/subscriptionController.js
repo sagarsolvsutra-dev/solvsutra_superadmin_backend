@@ -108,7 +108,7 @@ const getSubscriptionByProject = asyncHandler(async (req, res) => {
 // @route   POST /api/subscriptions
 // @access  Private
 const createSubscription = asyncHandler(async (req, res) => {
-  const { clientId, projectId, planId, startDate, autoRenew, notes } = req.body;
+  const { clientId, projectId, planId, startDate, gracePeriodDays, autoRenew, notes } = req.body;
 
   // Verify client and project exist
   const client = await Client.findById(clientId);
@@ -122,9 +122,12 @@ const createSubscription = asyncHandler(async (req, res) => {
     });
   }
 
+  // `?? 7`, not `|| 7` — 0 is a valid, explicit choice from the Create form
+  // and must not be silently replaced with a default grace period.
+  const resolvedGraceDays = gracePeriodDays ?? 7;
   const start = new Date(startDate || Date.now());
   const expiry = addDuration(start, plan.duration, plan.durationUnit);
-  const gracePeriodEndDate = addDuration(expiry, plan.gracePeriodDays || 7, "day");
+  const gracePeriodEndDate = addDuration(expiry, resolvedGraceDays, "day");
 
   const subscription = await Subscription.create({
     subscriptionId: generateSubscriptionId(),
@@ -133,7 +136,7 @@ const createSubscription = asyncHandler(async (req, res) => {
     planId,
     startDate: start,
     expiryDate: expiry,
-    gracePeriodDays: plan.gracePeriodDays || 7,
+    gracePeriodDays: resolvedGraceDays,
     gracePeriodEndDate,
     autoRenew: autoRenew || false,
     status: "active",
